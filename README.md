@@ -1,5 +1,5 @@
 # Music-Accompaniment---AI-powered
-
+(read in code mode)
 🎵 Music Analyzer — AI-Powered Accompaniment Assistant
 An AI-powered music analysis tool that converts audio into musical understanding — detecting key, tempo, and suggesting scales and chord tones for piano or instrumental accompaniment.
 This project combines signal processing, music theory, and machine learning (CNNs) to help musicians quickly find the right harmonic framework to play along with a song.
