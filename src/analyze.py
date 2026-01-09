@@ -17,6 +17,10 @@ import argparse
 import os
 from dataclasses import dataclass
 from typing import List, Tuple
+import torch
+from src.neural_key import load_model as load_neural_model, predict_key as predict_neural_key
+
+
 
 import numpy as np
 import librosa
@@ -213,34 +217,89 @@ def format_report(path: str, key: KeyResult, bpm: float | None, recs: List[Recom
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Analyze audio -> key + scale recommendations for accompaniment.")
+    ap = argparse.ArgumentParser(
+        description="Analyze audio -> key + scale recommendations for accompaniment."
+    )
     ap.add_argument("input", help="Path to audio file (wav/mp3/aiff...)")
-    ap.add_argument("--sr", type=int, default=22050, help="Sample rate for analysis")
-    ap.add_argument("--time", type=float, default=None, help="Analyze only first N seconds (faster)")
-    ap.add_argument("--auto-bpm", action="store_true", help="Estimate BPM (rough)")
+    ap.add_argument("--sr", type=int, default=22050)
+    ap.add_argument("--time", type=float, default=None)
+    ap.add_argument("--auto-bpm", action="store_true")
+    ap.add_argument(
+        "--detector",
+        choices=["template", "neural"],
+        default="template",
+        help="Key detector backend",
+    )
+    ap.add_argument(
+        "--ckpt",
+        type=str,
+        default="ml/models/key_cnn_best.pt",
+        help="Neural model checkpoint",
+    )
     args = ap.parse_args()
 
     if not os.path.exists(args.input):
         raise FileNotFoundError(f"File not found: {args.input}")
 
+    # ----------------------------
+    # Load audio
+    # ----------------------------
     y, sr = load_audio(args.input, sr=args.sr, duration=args.time)
-    chroma_mean = harmonic_chroma(y, sr)
-    key = detect_key(chroma_mean)
 
+    # ----------------------------
+    # Key detection
+    # ----------------------------
+    if args.detector == "template":
+        chroma_mean = harmonic_chroma(y, sr)
+        key = detect_key(chroma_mean)
+    else:
+        chroma_mean = None
+
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = "mps"
+        elif torch.cuda.is_available():
+            device = "cuda"
+        else:
+            device = "cpu"
+
+        model = load_neural_model(args.ckpt, device=device)
+        tonic, mode, prob, margin = predict_neural_key(
+            model, args.input, device=device
+        )
+
+        key = KeyResult(
+            tonic=tonic,
+            mode=mode,
+            score=prob,
+            confidence=margin,
+        )
+
+    # ----------------------------
+    # Tempo
+    # ----------------------------
     bpm = estimate_bpm(y, sr) if args.auto_bpm else None
-    recs = recommend_scales(key, chroma_mean)
 
+    # ----------------------------
+    # Scale recommendations
+    # ----------------------------
+    if chroma_mean is not None:
+        recs = recommend_scales(key, chroma_mean)
+    else:
+        recs = recommend_scales(key, np.zeros(12))
+
+    # ----------------------------
+    # Reporting
+    # ----------------------------
     report = format_report(args.input, key, bpm, recs)
 
     os.makedirs("out", exist_ok=True)
     base = os.path.splitext(os.path.basename(args.input))[0]
     out_path = os.path.join("out", f"{base}_report.txt")
+
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(report)
 
     print(report)
     print(f"\nSaved report -> {out_path}")
-
-
 if __name__ == "__main__":
     main()
