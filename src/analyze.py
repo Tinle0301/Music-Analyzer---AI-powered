@@ -449,15 +449,18 @@ def main():
                 key, chroma_mean if chroma_mean is not None else np.zeros(12)
             )
 
-            # AWS enrichment
+            # AWS enrichment (fails gracefully — key/tempo/scale still reported)
             aws_signals: Optional[Dict[str, Any]] = None
             if enrich_track is not None:
-                print("  Running AWS Transcribe + Comprehend...")
-                aws_signals = enrich_track(
-                    audio_path,
-                    s3_bucket=args.s3_bucket,
-                    region=args.aws_region,
-                )
+                try:
+                    print("  Running AWS Transcribe + Comprehend...")
+                    aws_signals = enrich_track(
+                        audio_path,
+                        s3_bucket=args.s3_bucket,
+                        region=args.aws_region,
+                    )
+                except Exception as aws_exc:
+                    print(f"  AWS enrichment failed: {aws_exc}", file=sys.stderr)
 
             # Per-track text report
             report = format_report(audio_path, key, bpm, recs, aws_signals)
